@@ -1,6 +1,6 @@
 # Laboratorio Vulnerable de Active Directory (VULN-HE.LAB) con Packer
 
-Este proxecto automatiza con Packer e PowerShell a creación dun Controlador de Dominio (Windows Server 2019) intencionadamente vulnerable. O obxectivo é despregar rapidamente un contorno para practicar técnicas de Red Team e Pentesting.
+Este proxecto automatiza con **Packer** e **PowerShell** a creación dun **Controlador de Dominio Windows Server 2019** intencionadamente vulnerable. O obxectivo é dispoñer dun contorno **didáctico e realista** para practicar técnicas de **Red Team / Pentesting Active Directory**, cubrindo todo o ciclo do ataque, incluíndo **persistencia avanzada en Kerberos**.
 
 **Idioma do Sistema:** Español (es-ES)  
 
@@ -17,14 +17,20 @@ O autor do presente documento declina calquera responsabilidade asociada ao uso 
 *   **DC IP:** `192.168.56.100` (Estática)  
 *   **Credenciais de Dominio:**
 
-| Usuario | Contrasinal | Rol / Vulnerabilidade Clave |
-| :--- | :--- | :--- |
-| **Administrador** | `abc123.` | Domain Admin (Vulnerable a Poisoning/Cracking) |
-| **brais.t** | `iloveyou` | Backup Operator (SeBackupPrivilege -> DA) |
-| **maria.g** | `dragon` | Potato Attack (SeImpersonatePrivilege -> SYSTEM) |
-| **nopreauth.user**| `AsrepMePlease123` | AS-REP Roasting (Kerberos) |
-| **svc_sql** | `SvcPassw0rdKerb!` | Kerberoasting (SPN MSSQL) |
-| **helpdesk.user** | `HelpDeskP@ss1` | Abuso de ACLs sobre `maria.g` |
+| Usuario | Contrasinal | Rol / Vulnerabilidade Clave | Acceso Viable | Utilidade |
+| :--- | :--- | :--- | :---: | :--- |
+| **Administrador** | `abc123.` | Domain Admin (LLMNR Poisoning) | ✅ | **Game Over** - Control total |
+| **brais.t** | `iloveyou` | Backup Operator (SeBackupPrivilege → DA) | ✅ | **Escalada crítica** - Dump NTDS |
+| **maria.g** | `dragon` | Potato Attack (SeImpersonatePrivilege → SYSTEM) | ✅ | **Escalada crítica** - SYSTEM vía Potato |
+| **nopreauth.user**| `AsrepMePlease123` | AS-REP Roasting (Sen pre-autenticación) | ⚠️ | **Demostración** - Hash non crackeable facilmente |
+| **svc_sql** | `SvcPassw0rdKerb!` | Kerberoasting (SPN MSSQL) + **Silver Ticket** | ⚠️ | **Persistencia crítica** - Silver Ticket (10 anos) |
+| **helpdesk.user** | `HelpDeskP@ss1` | Abuso de ACLs sobre `maria.g` (vía rpcclient) | ✅ | **Movemento lateral** - GenericAll sobre maria.g |
+| **krbtgt** | N/A | Conta de servizo KDC | N/A | **Persistencia MÁXIMA** - Golden Ticket (10 anos) |
+
+**Lenda:**  
+- ✅ Acceso directo viable (password spraying ou LLMNR)  
+- ⚠️ Acceso indirecto (require compromiso previo para obter hash/contrasinal)  
+- N/A Non aplicable (conta de sistema, non de acceso directo)
 
 ## Vulnerabilidades Implementadas
 
@@ -36,11 +42,33 @@ O autor do presente documento declina calquera responsabilidade asociada ao uso 
 2.  **Kerberos:**
     *   **AS-REP Roasting:** Usuario `nopreauth.user` sen pre-autenticación.
     *   **Kerberoasting:** Usuario `svc_sql` con SPN asociado e servizo SQL real instalado.
+    *   **Persistencia Avanzada**  
+        *   **Silver Ticket (Persistencia por Servizo):**  
+            *   **Conta obxectivo:** `svc_sql` (Hash NTLM: `ad2896ecfb9b443720bab09bb020f852`)  
+            *   **SPN:** `MSSQLSvc/VULN-DC-01.vuln-he.lab:1433`  
+            *   **Capacidades:**  
+                - Forxado de TGS para MSSQL válido 10 anos  
+                - Acceso persistente como Administrador ao servizo SQL  
+                - Execución remota vía `xp_cmdshell`  
+                - Escalada a SYSTEM mediante SeImpersonatePrivilege  
+        *   **Golden Ticket (Persistencia Total de Dominio):**  
+            *   **Conta crítica:** `krbtgt` (Hash NTLM)  
+            *   **Capacidades:**  
+                - Forxado de TGT válido para TODO o dominio durante 10 anos  
+                - Acceso ilimitado a calquera recurso/servizo  
+                - Non require comunicación co KDC  
+                - Practicamente indetectable  
 
-3.  **Privilexios e ACLs:**
-    *   **SeBackupPrivilege:** Usuario `brais.t` pode ler `NTDS.dit`.
-    *   **SeImpersonatePrivilege:** Usuario `maria.g` vulnerable a ataques tipo Potato.
-    *   **ACLs Débiles:** Grupo `HelpDesk` ten control total sobre `maria.g`.
+3.  **Password Spraying:**  
+    *   Contrasinais débiles en `brais.t` e `maria.g` (presentes en rockyou.txt).
+
+4.  **Privilexios e ACLs:**  
+    *   **SeBackupPrivilege:** Usuario `brais.t` pode ler `NTDS.dit`.  
+    *   **SeImpersonatePrivilege:** Usuario `maria.g` vulnerable a ataques tipo Potato.  
+
+5.  **ACLs Débiles:**  
+    *   **GenericAll ACL:** Grupo `HelpDesk` (usuario `helpdesk.user`) ten control total sobre `maria.g`.
+        *    **Explotación viable:** Mediante `rpcclient` desde Linux (cambio remoto de contrasinal sen necesidade de shell).
 
 ## Despregamento
 
@@ -88,3 +116,4 @@ Debido ás restricións de descarga automática, debes descargar manualmente o i
         - Nome: **vboxnet0**
 
 3.  Arrinca a máquina. A IP estará configurada estaticamente en `192.168.56.100`
+
